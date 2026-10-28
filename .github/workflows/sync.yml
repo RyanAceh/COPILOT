@@ -1,0 +1,60 @@
+name: Sync Google Sheets
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: google-sheets-sync
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download published Google Sheet
+        run: python scripts/sync_sheet.py
+      - name: Check downloaded CSV
+        run: python -c "import csv,pathlib; p=pathlib.Path('data/google_sheets.csv'); rows=list(csv.reader(p.open(encoding='utf-8-sig', newline=''))); assert rows, 'CSV is empty'; print('Rows:', len(rows))"
+
+  save:
+    name: Save CSV to GitHub
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download published Google Sheet
+        run: python scripts/sync_sheet.py
+      - name: Commit CSV if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/google_sheets.csv
+          if git diff --cached --quiet; then
+            echo "No changes detected"
+          else
+            git commit -m "chore: sync published Google Sheet"
+            git push
+          fi
